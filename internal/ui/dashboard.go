@@ -18,12 +18,13 @@ const (
 	TabIfaces
 	TabVPN
 	TabDNS
+	TabConns
 	TabMonitor
 	TabRescue
-	tabCount = 6
+	tabCount = 7
 )
 
-var tabNames = []string{"WiFi", "Interfaces", "VPN", "DNS", "Monitor", "Rescue"}
+var tabNames = []string{"WiFi", "Interfaces", "VPN", "DNS", "Conns", "Monitor", "Rescue"}
 
 type Model struct {
 	client    *nm.Client
@@ -32,6 +33,7 @@ type Model struct {
 	iface     IfacePanel
 	vpn       VPNPanel
 	dns       DNSPanel
+	conns     ConnsPanel
 	monitor   MonitorPanel
 	rescue    RescuePanel
 	notify    *NotifyManager
@@ -60,6 +62,7 @@ func NewModel(version string, cfg config.Config) Model {
 		m.vpn = NewVPNPanel(client)
 	}
 	m.dns = NewDNSPanel()
+	m.conns = NewConnsPanel()
 	m.monitor = NewMonitorPanel()
 	m.rescue = NewRescuePanel()
 
@@ -67,7 +70,7 @@ func NewModel(version string, cfg config.Config) Model {
 }
 
 func (m Model) Init() tea.Cmd {
-	cmds := []tea.Cmd{m.monitor.Init(), m.dns.Init()}
+	cmds := []tea.Cmd{m.monitor.Init(), m.dns.Init(), m.conns.Init()}
 	if m.client != nil {
 		cmds = append(cmds, m.wifi.Init(), m.iface.Init(), m.vpn.Init())
 	}
@@ -81,6 +84,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.String() != "q" && msg.String() != "ctrl+c" {
 				var cmd tea.Cmd
 				m.wifi, cmd = m.wifi.Update(msg)
+				return m, cmd
+			}
+		}
+
+		if m.activeTab == TabDNS && m.dns.mode == dnsModeChange {
+			if msg.String() != "q" && msg.String() != "ctrl+c" {
+				var cmd tea.Cmd
+				m.dns, cmd = m.dns.Update(msg)
 				return m, cmd
 			}
 		}
@@ -118,9 +129,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.activeTab = TabDNS
 			return m, nil
 		case "5":
-			m.activeTab = TabMonitor
+			m.activeTab = TabConns
 			return m, nil
 		case "6":
+			m.activeTab = TabMonitor
+			return m, nil
+		case "7":
 			m.activeTab = TabRescue
 			return m, nil
 		}
@@ -133,6 +147,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.iface.SetSize(msg.Width-4, contentHeight)
 		m.vpn.SetSize(msg.Width-4, contentHeight)
 		m.dns.SetSize(msg.Width-4, contentHeight)
+		m.conns.SetSize(msg.Width-4, contentHeight)
 		m.monitor.SetSize(msg.Width-4, contentHeight)
 		m.rescue.SetSize(msg.Width-4, contentHeight)
 		return m, nil
@@ -164,6 +179,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.vpn, cmd = m.vpn.Update(msg)
 	case TabDNS:
 		m.dns, cmd = m.dns.Update(msg)
+	case TabConns:
+		m.conns, cmd = m.conns.Update(msg)
 	case TabMonitor:
 		m.monitor, cmd = m.monitor.Update(msg)
 	case TabRescue:
@@ -228,6 +245,8 @@ func (m Model) View() string {
 		content = m.vpn.View()
 	case TabDNS:
 		content = m.dns.View()
+	case TabConns:
+		content = m.conns.View()
 	case TabMonitor:
 		content = m.monitor.View()
 	case TabRescue:
@@ -244,7 +263,7 @@ func (m Model) View() string {
 	statusBar := fmt.Sprintf(" %s tab  %s-%s panels  %s quit",
 		style.HelpKeyStyle.Render("Tab"),
 		style.HelpKeyStyle.Render("1"),
-		style.HelpKeyStyle.Render("6"),
+		style.HelpKeyStyle.Render("7"),
 		style.HelpKeyStyle.Render("q"),
 	)
 	b.WriteString(lipgloss.NewStyle().Foreground(style.Muted).Render(statusBar))

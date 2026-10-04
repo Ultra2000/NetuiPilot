@@ -158,7 +158,7 @@ func GetAllInterfaceStats() ([]InterfaceStats, error) {
 	return stats, scanner.Err()
 }
 
-// GetActiveConnections reads /proc/net/tcp and /proc/net/tcp6 for active connections.
+// GetActiveConnections reads /proc/net/tcp and /proc/net/tcp6 for active connections count.
 func GetActiveConnections() (int, error) {
 	count := 0
 	for _, path := range []string{"/proc/net/tcp", "/proc/net/tcp6"} {
@@ -176,7 +176,6 @@ func GetActiveConnections() (int, error) {
 			}
 			fields := strings.Fields(scanner.Text())
 			if len(fields) >= 4 {
-				// State 01 = ESTABLISHED
 				if fields[3] == "01" {
 					count++
 				}
@@ -185,6 +184,154 @@ func GetActiveConnections() (int, error) {
 		file.Close()
 	}
 	return count, nil
+}
+
+// SocketEntry represents a single TCP/UDP connection.
+type SocketEntry struct {
+	Proto    string
+	LocalIP  string
+	LocalPort uint16
+	RemoteIP string
+	RemotePort uint16
+	State    string
+	Inode    string
+}
+
+var tcpStates = map[string]string{
+	"01": "ESTABLISHED",
+	"02": "SYN_SENT",
+	"03": "SYN_RECV",
+	"04": "FIN_WAIT1",
+	"05": "FIN_WAIT2",
+	"06": "TIME_WAIT",
+	"07": "CLOSE",
+	"08": "CLOSE_WAIT",
+	"09": "LAST_ACK",
+	"0A": "LISTEN",
+	"0B": "CLOSING",
+}
+
+// GetDetailedConnections returns all TCP/UDP connections with details.
+func GetDetailedConnections() ([]SocketEntry, error) {
+	var entries []SocketEntry
+
+	for _, info := range []struct {
+		path  string
+		proto string
+		ipv6  bool
+	}{
+		{"/proc/net/tcp", "tcp", false},
+		{"/proc/net/tcp6", "tcp6", true},
+		{"/proc/net/udp", "udp", false},
+		{"/proc/net/udp6", "udp6", true},
+	} {
+		parsed, err := parseNetFile(info.path, info.proto, info.ipv6)
+		if err != nil {
+			continue
+		}
+		entries = append(entries, parsed...)
+	}
+
+	return entries, nil
+}
+
+func parseNetFile(path, proto string, ipv6 bool) ([]SocketEntry, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	var entries []SocketEntry
+	scanner := bufio.NewScanner(file)
+	lineNum := 0
+
+	for scanner.Scan() {
+		lineNum++
+		if lineNum <= 1 {
+			continue
+		}
+
+		fields := strings.Fields(scanner.Text())
+		if len(fields) < 4 {
+			continue
+		}
+
+		localIP, localPort := parseAddr(fields[1], ipv6)
+		remoteIP, remotePort := parseAddr(fields[2], ipv6)
+
+		state := fields[3]
+		stateName := tcpStates[state]
+		if stateName == "" {
+			stateName = state
+		}
+
+		// Skip unconnected UDP
+		if (proto == "udp" || proto == "udp6") && remotePort == 0 {
+			stateName = "LISTEN"
+		}
+
+		inode := ""
+		if len(fields) >= 10 {
+			inode = fields[9]
+		}
+
+		entries = append(entries, SocketEntry{
+			Proto:      proto,
+			LocalIP:    localIP,
+			LocalPort:  localPort,
+			RemoteIP:   remoteIP,
+			RemotePort: remotePort,
+			State:      stateName,
+			Inode:      inode,
+		})
+	}
+
+	return entries, scanner.Err()
+}
+
+func parseAddr(s string, ipv6 bool) (string, uint16) {
+	parts := strings.Split(s, ":")
+	if len(parts) != 2 {
+		return s, 0
+	}
+
+	port, _ := strconv.ParseUint(parts[1], 16, 16)
+
+	if ipv6 {
+		return parseIPv6(parts[0]), uint16(port)
+	}
+	return parseIPv4(parts[0]), uint16(port)
+}
+
+func parseIPv4(hex string) string {
+	if len(hex) != 8 {
+		return hex
+	}
+	b := make([]byte, 4)
+	for i := 0; i < 4; i++ {
+		val, _ := strconv.ParseUint(hex[i*2:i*2+2], 16, 8)
+		b[i] = byte(val)
+	}
+	// /proc/net uses little-endian on little-endian systems
+	return fmt.Sprintf("%d.%d.%d.%d", b[3], b[2], b[1], b[0])
+}
+
+func parseIPv6(hex string) string {
+	if len(hex) != 32 {
+		return hex
+	}
+	if hex == "00000000000000000000000000000000" {
+		return "::"
+	}
+	if hex[:24] == "000000000000000000000000" {
+		return parseIPv4(hex[24:])
+	}
+	// Simplified: show as IPv4-mapped if possible
+	if hex[:20] == "0000000000000000FFFF" || hex[:20] == "0000000000000000ffff" {
+		return parseIPv4(hex[24:])
+	}
+	return hex
 }
 
 func readSysUint64(path string) (uint64, error) {

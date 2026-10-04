@@ -12,13 +12,14 @@ import (
 )
 
 type IfacePanel struct {
-	client  *nm.Client
-	cfg     config.Config
-	devices []nm.Device
-	cursor  int
-	width   int
-	height  int
-	err     error
+	client      *nm.Client
+	cfg         config.Config
+	devices     []nm.Device
+	cursor      int
+	showVirtual bool
+	width       int
+	height      int
+	err         error
 }
 
 type devicesRefreshMsg struct {
@@ -57,6 +58,10 @@ func (p IfacePanel) Update(msg tea.Msg) (IfacePanel, tea.Cmd) {
 				p.cursor--
 			}
 		case "r":
+			return p, p.refresh
+		case "v":
+			p.showVirtual = !p.showVirtual
+			p.cursor = 0
 			return p, p.refresh
 		case "enter":
 			if len(p.devices) > 0 && p.cursor < len(p.devices) {
@@ -158,10 +163,16 @@ func (p IfacePanel) View() string {
 	}
 
 	b.WriteString("\n")
-	help := fmt.Sprintf("%s refresh  %s connect  %s disconnect  %s/%s navigate",
+	vLabel := "show virtual"
+	if p.showVirtual {
+		vLabel = "hide virtual"
+	}
+	help := fmt.Sprintf("%s refresh  %s connect  %s disconnect  %s %s  %s/%s navigate",
 		style.HelpKeyStyle.Render("r"),
 		style.HelpKeyStyle.Render("↵"),
 		style.HelpKeyStyle.Render("d"),
+		style.HelpKeyStyle.Render("v"),
+		vLabel,
 		style.HelpKeyStyle.Render("j"),
 		style.HelpKeyStyle.Render("k"),
 	)
@@ -186,9 +197,13 @@ func (p IfacePanel) refresh() tea.Msg {
 	}
 	var filtered []nm.Device
 	for _, d := range devices {
-		if !p.cfg.IsHidden(d.Name) {
-			filtered = append(filtered, d)
+		if p.cfg.IsHidden(d.Name) {
+			continue
 		}
+		if !p.showVirtual && isVirtualIface(d.Name, d.Type) {
+			continue
+		}
+		filtered = append(filtered, d)
 	}
 	return devicesRefreshMsg{devices: filtered}
 }
@@ -236,4 +251,17 @@ func (p IfacePanel) deactivateDevice(dev nm.Device) func() tea.Msg {
 		devices, _ := p.client.GetDevices()
 		return devicesRefreshMsg{devices: devices}
 	}
+}
+
+func isVirtualIface(name string, devType nm.DeviceType) bool {
+	if devType == nm.DeviceTypeBridge {
+		return true
+	}
+	virtualPrefixes := []string{"docker", "veth", "br-", "virbr", "vbox", "vmnet", "tun", "tap"}
+	for _, prefix := range virtualPrefixes {
+		if strings.HasPrefix(name, prefix) {
+			return true
+		}
+	}
+	return false
 }
