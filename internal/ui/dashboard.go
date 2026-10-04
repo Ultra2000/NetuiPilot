@@ -91,6 +91,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.iface.SetSize(msg.Width-4, contentHeight)
 		m.monitor.SetSize(msg.Width-4, contentHeight)
 		return m, nil
+
+	case MonitorTickMsg, MonitorDataMsg:
+		var monCmd tea.Cmd
+		m.monitor, monCmd = m.monitor.Update(msg)
+		return m, monCmd
 	}
 
 	var cmd tea.Cmd

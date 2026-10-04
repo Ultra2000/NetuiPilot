@@ -23,9 +23,9 @@ type MonitorPanel struct {
 	err         error
 }
 
-type monitorTickMsg time.Time
+type MonitorTickMsg time.Time
 
-type monitorDataMsg struct {
+type MonitorDataMsg struct {
 	stats       []net.InterfaceStats
 	activeConns int
 	err         error
@@ -43,10 +43,10 @@ func (m MonitorPanel) Init() tea.Cmd {
 
 func (m MonitorPanel) Update(msg tea.Msg) (MonitorPanel, tea.Cmd) {
 	switch msg := msg.(type) {
-	case monitorTickMsg:
+	case MonitorTickMsg:
 		return m, tea.Batch(m.fetchData, m.tickCmd())
 
-	case monitorDataMsg:
+	case MonitorDataMsg:
 		m.err = msg.err
 		if msg.err == nil {
 			m.stats = msg.stats
@@ -163,15 +163,15 @@ func (m *MonitorPanel) SetSize(width, height int) {
 func (m MonitorPanel) fetchData() tea.Msg {
 	stats, err := net.GetAllInterfaceStats()
 	if err != nil {
-		return monitorDataMsg{err: err}
+		return MonitorDataMsg{err: err}
 	}
 	conns, _ := net.GetActiveConnections()
-	return monitorDataMsg{stats: stats, activeConns: conns}
+	return MonitorDataMsg{stats: stats, activeConns: conns}
 }
 
 func (m MonitorPanel) tickCmd() tea.Cmd {
 	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
-		return monitorTickMsg(t)
+		return MonitorTickMsg(t)
 	})
 }
 
