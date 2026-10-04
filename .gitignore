@@ -1,4 +1,4 @@
-netuipilot
+/netuipilot
 *.exe
 dist/
 vendor/
