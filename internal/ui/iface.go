@@ -1,0 +1,202 @@
+package ui
+
+import (
+	"fmt"
+	"strings"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/Ultra2000/netuipilot/internal/nm"
+	"github.com/Ultra2000/netuipilot/internal/style"
+)
+
+type IfacePanel struct {
+	client  *nm.Client
+	devices []nm.Device
+	cursor  int
+	width   int
+	height  int
+	err     error
+}
+
+type devicesRefreshMsg struct {
+	devices []nm.Device
+	err     error
+}
+
+func NewIfacePanel(client *nm.Client) IfacePanel {
+	return IfacePanel{
+		client: client,
+	}
+}
+
+func (p IfacePanel) Init() tea.Cmd {
+	return p.refresh
+}
+
+func (p IfacePanel) Update(msg tea.Msg) (IfacePanel, tea.Cmd) {
+	switch msg := msg.(type) {
+	case devicesRefreshMsg:
+		p.err = msg.err
+		if msg.err == nil {
+			p.devices = msg.devices
+		}
+		return p, nil
+
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "j", "down":
+			if p.cursor < len(p.devices)-1 {
+				p.cursor++
+			}
+		case "k", "up":
+			if p.cursor > 0 {
+				p.cursor--
+			}
+		case "r":
+			return p, p.refresh
+		case "enter":
+			if len(p.devices) > 0 && p.cursor < len(p.devices) {
+				dev := p.devices[p.cursor]
+				if dev.State == nm.DeviceStateDisconnected {
+					return p, p.activateDevice(dev)
+				}
+			}
+		case "d":
+			if len(p.devices) > 0 && p.cursor < len(p.devices) {
+				dev := p.devices[p.cursor]
+				if dev.State == nm.DeviceStateActivated {
+					return p, p.deactivateDevice(dev)
+				}
+			}
+		}
+	}
+	return p, nil
+}
+
+func (p IfacePanel) View() string {
+	var b strings.Builder
+
+	header := style.TitleStyle.Render("🔌 Interfaces")
+	b.WriteString(header)
+	b.WriteString("\n\n")
+
+	if p.err != nil {
+		b.WriteString(style.DisconnectedStyle.Render(fmt.Sprintf("Error: %v", p.err)))
+		b.WriteString("\n\n")
+	}
+
+	if len(p.devices) == 0 {
+		b.WriteString(style.SubtitleStyle.Render("No devices found. Press 'r' to refresh."))
+		return b.String()
+	}
+
+	headerRow := style.HeaderStyle.Render(
+		fmt.Sprintf("  %-16s %-12s %-18s %-18s", "INTERFACE", "TYPE", "STATE", "MAC"),
+	)
+	b.WriteString(headerRow)
+	b.WriteString("\n")
+
+	for i, dev := range p.devices {
+		icon := style.StatusIcon(dev.State == nm.DeviceStateActivated)
+		typeName := nm.DeviceTypeName(dev.Type)
+		stateName := nm.DeviceStateName(dev.State)
+
+		stateStyled := stateName
+		if dev.State == nm.DeviceStateActivated {
+			stateStyled = style.ConnectedStyle.Render(stateName)
+		} else if dev.State == nm.DeviceStateFailed {
+			stateStyled = style.DisconnectedStyle.Render(stateName)
+		}
+
+		row := fmt.Sprintf("%s %-16s %-12s %-18s %-18s",
+			icon,
+			dev.Name,
+			typeName,
+			stateStyled,
+			dev.HWAddr,
+		)
+
+		if i == p.cursor {
+			row = style.SelectedRowStyle.Render(row)
+		} else {
+			row = style.RowStyle.Render(row)
+		}
+
+		b.WriteString(row)
+		b.WriteString("\n")
+	}
+
+	b.WriteString("\n")
+	help := fmt.Sprintf("%s refresh  %s connect  %s disconnect  %s/%s navigate",
+		style.HelpKeyStyle.Render("r"),
+		style.HelpKeyStyle.Render("↵"),
+		style.HelpKeyStyle.Render("d"),
+		style.HelpKeyStyle.Render("j"),
+		style.HelpKeyStyle.Render("k"),
+	)
+	b.WriteString(help)
+
+	return b.String()
+}
+
+func (p *IfacePanel) SetSize(width, height int) {
+	p.width = width
+	p.height = height
+}
+
+func (p IfacePanel) refresh() tea.Msg {
+	if p.client == nil {
+		return devicesRefreshMsg{err: fmt.Errorf("no NetworkManager connection")}
+	}
+
+	devices, err := p.client.GetDevices()
+	if err != nil {
+		return devicesRefreshMsg{err: err}
+	}
+	return devicesRefreshMsg{devices: devices}
+}
+
+func (p IfacePanel) activateDevice(dev nm.Device) func() tea.Msg {
+	return func() tea.Msg {
+		conns, err := p.client.GetSavedConnections()
+		if err != nil {
+			return devicesRefreshMsg{err: err}
+		}
+
+		typeName := ""
+		switch dev.Type {
+		case nm.DeviceTypeEthernet:
+			typeName = "802-3-ethernet"
+		case nm.DeviceTypeWiFi:
+			typeName = "802-11-wireless"
+		}
+
+		for _, conn := range conns {
+			if conn.Type == typeName {
+				err := p.client.ActivateConnection(conn.Path, dev.Path)
+				if err != nil {
+					return devicesRefreshMsg{err: err}
+				}
+				devices, _ := p.client.GetDevices()
+				return devicesRefreshMsg{devices: devices}
+			}
+		}
+
+		return devicesRefreshMsg{err: fmt.Errorf("no saved connection for %s", dev.Name)}
+	}
+}
+
+func (p IfacePanel) deactivateDevice(dev nm.Device) func() tea.Msg {
+	return func() tea.Msg {
+		activeConn, err := p.client.GetActiveConnectionForDevice(dev.Path)
+		if err != nil {
+			return devicesRefreshMsg{err: err}
+		}
+		err = p.client.DeactivateConnection(activeConn)
+		if err != nil {
+			return devicesRefreshMsg{err: err}
+		}
+		devices, _ := p.client.GetDevices()
+		return devicesRefreshMsg{devices: devices}
+	}
+}
