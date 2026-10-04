@@ -123,3 +123,25 @@ func StatusIcon(connected bool) string {
 	}
 	return DisconnectedStyle.Render("○")
 }
+
+// ApplyTheme overrides default colors with custom hex values.
+func ApplyTheme(primary, secondary, accent, success, warning, danger string) {
+	if primary != "" {
+		Primary = lipgloss.Color(primary)
+	}
+	if secondary != "" {
+		Secondary = lipgloss.Color(secondary)
+	}
+	if accent != "" {
+		Accent = lipgloss.Color(accent)
+	}
+	if success != "" {
+		Success = lipgloss.Color(success)
+	}
+	if warning != "" {
+		Warning = lipgloss.Color(warning)
+	}
+	if danger != "" {
+		Danger = lipgloss.Color(danger)
+	}
+}

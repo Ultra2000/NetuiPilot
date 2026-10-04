@@ -6,12 +6,14 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/Ultra2000/netuipilot/internal/config"
 	"github.com/Ultra2000/netuipilot/internal/nm"
 	"github.com/Ultra2000/netuipilot/internal/style"
 )
 
 type IfacePanel struct {
 	client  *nm.Client
+	cfg     config.Config
 	devices []nm.Device
 	cursor  int
 	width   int
@@ -24,9 +26,10 @@ type devicesRefreshMsg struct {
 	err     error
 }
 
-func NewIfacePanel(client *nm.Client) IfacePanel {
+func NewIfacePanel(client *nm.Client, cfg config.Config) IfacePanel {
 	return IfacePanel{
 		client: client,
+		cfg:    cfg,
 	}
 }
 
@@ -183,7 +186,7 @@ func (p IfacePanel) refresh() tea.Msg {
 	}
 	var filtered []nm.Device
 	for _, d := range devices {
-		if d.Name != "lo" {
+		if !p.cfg.IsHidden(d.Name) {
 			filtered = append(filtered, d)
 		}
 	}

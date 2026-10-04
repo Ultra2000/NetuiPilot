@@ -1,0 +1,49 @@
+version: 2
+
+project_name: netuipilot
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - main: ./cmd/netuipilot/
+    binary: netuipilot
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+      - arm
+    goarm:
+      - "7"
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w -X main.version={{.Version}} -X main.commit={{.ShortCommit}}
+
+archives:
+  - format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}"
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+
+nfpms:
+  - package_name: netuipilot
+    homepage: https://github.com/Ultra2000/NetuiPilot
+    maintainer: Ultra2000
+    description: Modern TUI network manager for Linux
+    license: MIT
+    formats:
+      - deb
+      - rpm
+    bindir: /usr/local/bin

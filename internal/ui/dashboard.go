@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/Ultra2000/netuipilot/internal/config"
 	"github.com/Ultra2000/netuipilot/internal/nm"
 	"github.com/Ultra2000/netuipilot/internal/style"
 )
@@ -32,12 +33,14 @@ type Model struct {
 	dns       DNSPanel
 	monitor   MonitorPanel
 	notify    *NotifyManager
+	cfg       config.Config
+	version   string
 	width     int
 	height    int
 	err       error
 }
 
-func NewModel() Model {
+func NewModel(version string, cfg config.Config) Model {
 	client, err := nm.NewClient()
 
 	m := Model{
@@ -45,11 +48,13 @@ func NewModel() Model {
 		activeTab: TabWiFi,
 		err:       err,
 		notify:    NewNotifyManager(),
+		version:   version,
+		cfg:       cfg,
 	}
 
 	if client != nil {
 		m.wifi = NewWiFiPanel(client)
-		m.iface = NewIfacePanel(client)
+		m.iface = NewIfacePanel(client, cfg)
 		m.vpn = NewVPNPanel(client)
 	}
 	m.dns = NewDNSPanel()
@@ -161,7 +166,7 @@ func (m Model) View() string {
 
 	version := lipgloss.NewStyle().
 		Foreground(style.Muted).
-		Render(" v0.3.0")
+		Render(" v" + m.version)
 
 	notifyBar := m.notify.RenderBar()
 

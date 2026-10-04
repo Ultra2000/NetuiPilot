@@ -12,21 +12,23 @@ Existing tools only solve part of the problem:
 
 | Tool | WiFi | Ethernet | VPN | DNS | Monitoring | Modern UI |
 |------|------|----------|-----|-----|------------|-----------|
-| `nmtui` | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
-| `nmtui-go` | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ |
-| `wtui` | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ |
-| **NetuiPilot** | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `nmtui` | Yes | Yes | No | No | No | No |
+| `nmtui-go` | Yes | No | No | No | No | Yes |
+| `wtui` | Yes | Yes | No | No | No | Yes |
+| **NetuiPilot** | Yes | Yes | Yes | Yes | Yes | Yes |
 
 NetuiPilot is a **single dashboard** that replaces `nmtui` + `iftop` + `ss` + `resolvectl`.
 
 ## Features
 
-- **Dashboard view** — all interfaces at a glance with live status
-- **WiFi management** — scan, connect, disconnect, manage saved networks
-- **Interface control** — Ethernet, WiFi, VPN, Bridge, all in one place
-- **DNS configuration** — view and manage DNS resolvers per interface
-- **Live monitoring** — real-time bandwidth (RX/TX), latency, active connections
-- **Keyboard-driven** — vim-style navigation (`j`/`k`/`h`/`l`)
+- **WiFi management** — scan, connect with password prompt, disconnect
+- **Interface control** — IP, gateway, subnet, MTU details at a glance
+- **VPN support** — WireGuard & OpenVPN profiles, toggle on/off
+- **DNS resolvers** — view DNS config per interface via resolvectl
+- **Live monitoring** — real-time bandwidth sparklines, active connections
+- **Notifications** — alerts when interfaces connect/disconnect/fail
+- **Config file** — custom theme colors, hidden interfaces
+- **Keyboard-driven** — vim-style navigation (`j`/`k`)
 - **Zero dependencies** — single static binary, no Python, no Node
 - **D-Bus native** — talks directly to NetworkManager, no `nmcli` parsing
 
@@ -35,14 +37,23 @@ NetuiPilot is a **single dashboard** that replaces `nmtui` + `iftop` + `ss` + `r
 ### From source
 
 ```bash
-go install github.com/Ultra2000/netuipilot@latest
+git clone https://github.com/Ultra2000/NetuiPilot.git
+cd NetuiPilot
+make install
+```
+
+### Go install
+
+```bash
+go install github.com/Ultra2000/netuipilot/cmd/netuipilot@latest
 ```
 
 ### Binary release
 
+Download from [Releases](https://github.com/Ultra2000/NetuiPilot/releases):
+
 ```bash
-curl -sL https://github.com/Ultra2000/netuipilot/releases/latest/download/netuipilot-linux-amd64 -o netuipilot
-chmod +x netuipilot
+curl -sL https://github.com/Ultra2000/netuipilot/releases/latest/download/netuipilot_linux_amd64.tar.gz | tar xz
 sudo mv netuipilot /usr/local/bin/
 ```
 
@@ -56,15 +67,34 @@ netuipilot
 
 | Key | Action |
 |-----|--------|
-| `Tab` | Switch panel |
-| `j` / `↓` | Move down |
-| `k` / `↑` | Move up |
-| `Enter` | Connect / expand |
+| `Tab` / `Shift+Tab` | Switch panel |
+| `1`-`5` | Jump to panel |
+| `j` / `k` | Move down / up |
+| `Enter` | Connect / toggle |
 | `d` | Disconnect |
 | `s` | Scan WiFi |
-| `m` | Toggle monitoring |
 | `r` | Refresh |
-| `q` / `Esc` | Quit |
+| `Ctrl+T` | Show/hide WiFi password |
+| `q` | Quit |
+
+## Configuration
+
+Config file: `~/.config/netuipilot/config.json`
+
+```json
+{
+  "hidden_interfaces": ["lo", "docker0"],
+  "refresh_interval_ms": 1000,
+  "theme": {
+    "primary": "#7F77DD",
+    "secondary": "#1D9E75",
+    "accent": "#D85A30",
+    "success": "#639922",
+    "warning": "#EF9F27",
+    "danger": "#E24B4A"
+  }
+}
+```
 
 ## Requirements
 
@@ -78,15 +108,20 @@ netuipilot/
 ├── cmd/netuipilot/      # Entry point
 ├── internal/
 │   ├── ui/              # Bubbletea models & views
-│   │   ├── dashboard.go # Main dashboard
-│   │   ├── wifi.go      # WiFi panel
-│   │   ├── iface.go     # Interface panel
-│   │   └── monitor.go   # Bandwidth monitor
+│   │   ├── dashboard.go # Main dashboard with tabs
+│   │   ├── wifi.go      # WiFi panel + password prompt
+│   │   ├── iface.go     # Interface details panel
+│   │   ├── vpn.go       # VPN toggle panel
+│   │   ├── dns.go       # DNS resolvers panel
+│   │   ├── monitor.go   # Bandwidth monitor + sparklines
+│   │   └── notify.go    # Connection notifications
 │   ├── nm/              # NetworkManager D-Bus client
 │   ├── net/             # System network info (/proc, /sys)
-│   └── style/           # Lipgloss styles
-├── go.mod
-└── README.md
+│   ├── config/          # Config file loader
+│   └── style/           # Lipgloss theme
+├── .goreleaser.yml      # Release automation
+├── Makefile
+└── go.mod
 ```
 
 ## License
