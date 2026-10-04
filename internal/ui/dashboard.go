@@ -15,20 +15,23 @@ type Tab int
 const (
 	TabWiFi Tab = iota
 	TabIfaces
+	TabVPN
 	TabDNS
 	TabMonitor
-	tabCount = 4
+	tabCount = 5
 )
 
-var tabNames = []string{"WiFi", "Interfaces", "DNS", "Monitor"}
+var tabNames = []string{"WiFi", "Interfaces", "VPN", "DNS", "Monitor"}
 
 type Model struct {
 	client    *nm.Client
 	activeTab Tab
 	wifi      WiFiPanel
 	iface     IfacePanel
+	vpn       VPNPanel
 	dns       DNSPanel
 	monitor   MonitorPanel
+	notify    *NotifyManager
 	width     int
 	height    int
 	err       error
@@ -41,11 +44,13 @@ func NewModel() Model {
 		client:    client,
 		activeTab: TabWiFi,
 		err:       err,
+		notify:    NewNotifyManager(),
 	}
 
 	if client != nil {
 		m.wifi = NewWiFiPanel(client)
 		m.iface = NewIfacePanel(client)
+		m.vpn = NewVPNPanel(client)
 	}
 	m.dns = NewDNSPanel()
 	m.monitor = NewMonitorPanel()
@@ -56,7 +61,7 @@ func NewModel() Model {
 func (m Model) Init() tea.Cmd {
 	cmds := []tea.Cmd{m.monitor.Init(), m.dns.Init()}
 	if m.client != nil {
-		cmds = append(cmds, m.wifi.Init(), m.iface.Init())
+		cmds = append(cmds, m.wifi.Init(), m.iface.Init(), m.vpn.Init())
 	}
 	return tea.Batch(cmds...)
 }
@@ -91,9 +96,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.activeTab = TabIfaces
 			return m, nil
 		case "3":
-			m.activeTab = TabDNS
+			m.activeTab = TabVPN
 			return m, nil
 		case "4":
+			m.activeTab = TabDNS
+			return m, nil
+		case "5":
 			m.activeTab = TabMonitor
 			return m, nil
 		}
@@ -101,9 +109,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		contentHeight := msg.Height - 5
+		contentHeight := msg.Height - 6
 		m.wifi.SetSize(msg.Width-4, contentHeight)
 		m.iface.SetSize(msg.Width-4, contentHeight)
+		m.vpn.SetSize(msg.Width-4, contentHeight)
 		m.dns.SetSize(msg.Width-4, contentHeight)
 		m.monitor.SetSize(msg.Width-4, contentHeight)
 		return m, nil
@@ -112,6 +121,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var monCmd tea.Cmd
 		m.monitor, monCmd = m.monitor.Update(msg)
 		return m, monCmd
+
+	case devicesRefreshMsg:
+		if msg.err == nil {
+			m.notify.CheckDevices(msg.devices)
+		}
+		if m.activeTab == TabIfaces {
+			var cmd tea.Cmd
+			m.iface, cmd = m.iface.Update(msg)
+			return m, cmd
+		}
+		return m, nil
 	}
 
 	var cmd tea.Cmd
@@ -120,6 +140,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.wifi, cmd = m.wifi.Update(msg)
 	case TabIfaces:
 		m.iface, cmd = m.iface.Update(msg)
+	case TabVPN:
+		m.vpn, cmd = m.vpn.Update(msg)
 	case TabDNS:
 		m.dns, cmd = m.dns.Update(msg)
 	case TabMonitor:
@@ -139,9 +161,11 @@ func (m Model) View() string {
 
 	version := lipgloss.NewStyle().
 		Foreground(style.Muted).
-		Render(" v0.2.0")
+		Render(" v0.3.0")
 
-	b.WriteString(title + version)
+	notifyBar := m.notify.RenderBar()
+
+	b.WriteString(title + version + notifyBar)
 	b.WriteString("\n")
 
 	var tabs []string
@@ -178,6 +202,8 @@ func (m Model) View() string {
 		content = m.wifi.View()
 	case TabIfaces:
 		content = m.iface.View()
+	case TabVPN:
+		content = m.vpn.View()
 	case TabDNS:
 		content = m.dns.View()
 	case TabMonitor:
@@ -191,12 +217,10 @@ func (m Model) View() string {
 	b.WriteString(panelStyle.Render(content))
 
 	b.WriteString("\n")
-	statusBar := fmt.Sprintf(" %s tab  %s/%s/%s/%s panels  %s quit",
+	statusBar := fmt.Sprintf(" %s tab  %s-%s panels  %s quit",
 		style.HelpKeyStyle.Render("Tab"),
 		style.HelpKeyStyle.Render("1"),
-		style.HelpKeyStyle.Render("2"),
-		style.HelpKeyStyle.Render("3"),
-		style.HelpKeyStyle.Render("4"),
+		style.HelpKeyStyle.Render("5"),
 		style.HelpKeyStyle.Render("q"),
 	)
 	b.WriteString(lipgloss.NewStyle().Foreground(style.Muted).Render(statusBar))

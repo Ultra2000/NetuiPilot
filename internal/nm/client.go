@@ -59,6 +59,9 @@ type Device struct {
 	State     DeviceState
 	HWAddr    string
 	IP4Addr   string
+	Gateway   string
+	Subnet    string
+	MTU       uint32
 	ActiveAP  dbus.ObjectPath
 }
 
@@ -147,7 +150,52 @@ func (c *Client) getDevice(path dbus.ObjectPath) (Device, error) {
 		device.HWAddr = hwAddr.Value().(string)
 	}
 
+	mtu, err := c.getProperty(obj, nmDeviceInterface, "Mtu")
+	if err == nil {
+		device.MTU = mtu.Value().(uint32)
+	}
+
+	ip4ConfigPath, err := c.getProperty(obj, nmDeviceInterface, "Ip4Config")
+	if err == nil {
+		cfgPath := ip4ConfigPath.Value().(dbus.ObjectPath)
+		if cfgPath != "/" && cfgPath != "" {
+			c.fillIP4Info(&device, cfgPath)
+		}
+	}
+
 	return device, nil
+}
+
+func (c *Client) fillIP4Info(device *Device, cfgPath dbus.ObjectPath) {
+	cfgObj := c.conn.Object(nmBus, cfgPath)
+
+	addrData, err := c.getProperty(cfgObj, "org.freedesktop.NetworkManager.IP4Config", "AddressData")
+	if err == nil {
+		addrs := addrData.Value().([]map[string]dbus.Variant)
+		if len(addrs) > 0 {
+			if addr, ok := addrs[0]["address"]; ok {
+				device.IP4Addr = addr.Value().(string)
+			}
+			if prefix, ok := addrs[0]["prefix"]; ok {
+				device.Subnet = prefixToSubnet(prefix.Value().(uint32))
+			}
+		}
+	}
+
+	gw, err := c.getProperty(cfgObj, "org.freedesktop.NetworkManager.IP4Config", "Gateway")
+	if err == nil {
+		device.Gateway = gw.Value().(string)
+	}
+}
+
+func prefixToSubnet(prefix uint32) string {
+	mask := uint32(0xFFFFFFFF) << (32 - prefix)
+	return fmt.Sprintf("%d.%d.%d.%d",
+		(mask>>24)&0xFF,
+		(mask>>16)&0xFF,
+		(mask>>8)&0xFF,
+		mask&0xFF,
+	)
 }
 
 // GetAccessPoints returns visible WiFi access points for a wireless device.
@@ -309,6 +357,59 @@ func (c *Client) getConnection(path dbus.ObjectPath) (Connection, error) {
 func (c *Client) DeleteConnection(connPath dbus.ObjectPath) error {
 	obj := c.conn.Object(nmBus, connPath)
 	return obj.Call(nmSettingsConn+".Delete", 0).Err
+}
+
+// ActiveConnection represents a currently active connection.
+type ActiveConnection struct {
+	Path dbus.ObjectPath
+	ID   string
+	Type string
+}
+
+// GetActiveConnections returns all active connections.
+func (c *Client) GetActiveConnections() ([]ActiveConnection, error) {
+	obj := c.conn.Object(nmBus, nmPath)
+	prop, err := c.getProperty(obj, nmInterface, "ActiveConnections")
+	if err != nil {
+		return nil, err
+	}
+
+	paths := prop.Value().([]dbus.ObjectPath)
+	var conns []ActiveConnection
+
+	for _, path := range paths {
+		acObj := c.conn.Object(nmBus, path)
+		ac := ActiveConnection{Path: path}
+
+		id, err := c.getProperty(acObj, nmConnActive, "Id")
+		if err == nil {
+			ac.ID = id.Value().(string)
+		}
+
+		connType, err := c.getProperty(acObj, nmConnActive, "Type")
+		if err == nil {
+			ac.Type = connType.Value().(string)
+		}
+
+		conns = append(conns, ac)
+	}
+	return conns, nil
+}
+
+// GetActiveVPNConnections returns IDs of active VPN connections.
+func (c *Client) GetActiveVPNConnections() ([]string, error) {
+	conns, err := c.GetActiveConnections()
+	if err != nil {
+		return nil, err
+	}
+
+	var vpnIDs []string
+	for _, conn := range conns {
+		if conn.Type == "vpn" || conn.Type == "wireguard" {
+			vpnIDs = append(vpnIDs, conn.ID)
+		}
+	}
+	return vpnIDs, nil
 }
 
 func (c *Client) getProperty(obj dbus.BusObject, iface, prop string) (dbus.Variant, error) {

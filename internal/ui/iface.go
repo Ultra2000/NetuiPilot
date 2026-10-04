@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/Ultra2000/netuipilot/internal/nm"
 	"github.com/Ultra2000/netuipilot/internal/style"
 )
@@ -124,6 +125,33 @@ func (p IfacePanel) View() string {
 
 		b.WriteString(row)
 		b.WriteString("\n")
+	}
+
+	if p.cursor < len(p.devices) {
+		dev := p.devices[p.cursor]
+		b.WriteString("\n")
+		detailTitle := lipgloss.NewStyle().Bold(true).Foreground(style.Primary).Render(dev.Name + " details")
+		b.WriteString(detailTitle)
+		b.WriteString("\n")
+
+		detailLabel := lipgloss.NewStyle().Foreground(style.Muted)
+
+		if dev.IP4Addr != "" {
+			b.WriteString(fmt.Sprintf("  %s %s\n", detailLabel.Render("IP:"), dev.IP4Addr))
+		}
+		if dev.Subnet != "" {
+			b.WriteString(fmt.Sprintf("  %s %s\n", detailLabel.Render("Subnet:"), dev.Subnet))
+		}
+		if dev.Gateway != "" {
+			b.WriteString(fmt.Sprintf("  %s %s\n", detailLabel.Render("Gateway:"), dev.Gateway))
+		}
+		if dev.MTU > 0 {
+			b.WriteString(fmt.Sprintf("  %s %d\n", detailLabel.Render("MTU:"), dev.MTU))
+		}
+		if dev.IP4Addr == "" && dev.State != nm.DeviceStateActivated {
+			b.WriteString(style.SubtitleStyle.Render("  Not connected"))
+			b.WriteString("\n")
+		}
 	}
 
 	b.WriteString("\n")
