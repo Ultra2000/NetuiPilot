@@ -15,16 +15,19 @@ type Tab int
 const (
 	TabWiFi Tab = iota
 	TabIfaces
+	TabDNS
 	TabMonitor
+	tabCount = 4
 )
 
-var tabNames = []string{"WiFi", "Interfaces", "Monitor"}
+var tabNames = []string{"WiFi", "Interfaces", "DNS", "Monitor"}
 
 type Model struct {
 	client    *nm.Client
 	activeTab Tab
 	wifi      WiFiPanel
 	iface     IfacePanel
+	dns       DNSPanel
 	monitor   MonitorPanel
 	width     int
 	height    int
@@ -44,13 +47,14 @@ func NewModel() Model {
 		m.wifi = NewWiFiPanel(client)
 		m.iface = NewIfacePanel(client)
 	}
+	m.dns = NewDNSPanel()
 	m.monitor = NewMonitorPanel()
 
 	return m
 }
 
 func (m Model) Init() tea.Cmd {
-	cmds := []tea.Cmd{m.monitor.Init()}
+	cmds := []tea.Cmd{m.monitor.Init(), m.dns.Init()}
 	if m.client != nil {
 		cmds = append(cmds, m.wifi.Init(), m.iface.Init())
 	}
@@ -60,17 +64,25 @@ func (m Model) Init() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		if m.activeTab == TabWiFi && m.wifi.mode == wifiModePassword {
+			if msg.String() != "q" && msg.String() != "ctrl+c" {
+				var cmd tea.Cmd
+				m.wifi, cmd = m.wifi.Update(msg)
+				return m, cmd
+			}
+		}
+
 		switch msg.String() {
-		case "q", "esc", "ctrl+c":
+		case "q", "ctrl+c":
 			if m.client != nil {
 				m.client.Close()
 			}
 			return m, tea.Quit
 		case "tab":
-			m.activeTab = (m.activeTab + 1) % 3
+			m.activeTab = (m.activeTab + 1) % tabCount
 			return m, nil
 		case "shift+tab":
-			m.activeTab = (m.activeTab + 2) % 3
+			m.activeTab = (m.activeTab + tabCount - 1) % tabCount
 			return m, nil
 		case "1":
 			m.activeTab = TabWiFi
@@ -79,6 +91,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.activeTab = TabIfaces
 			return m, nil
 		case "3":
+			m.activeTab = TabDNS
+			return m, nil
+		case "4":
 			m.activeTab = TabMonitor
 			return m, nil
 		}
@@ -89,6 +104,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		contentHeight := msg.Height - 5
 		m.wifi.SetSize(msg.Width-4, contentHeight)
 		m.iface.SetSize(msg.Width-4, contentHeight)
+		m.dns.SetSize(msg.Width-4, contentHeight)
 		m.monitor.SetSize(msg.Width-4, contentHeight)
 		return m, nil
 
@@ -104,6 +120,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.wifi, cmd = m.wifi.Update(msg)
 	case TabIfaces:
 		m.iface, cmd = m.iface.Update(msg)
+	case TabDNS:
+		m.dns, cmd = m.dns.Update(msg)
 	case TabMonitor:
 		m.monitor, cmd = m.monitor.Update(msg)
 	}
@@ -121,7 +139,7 @@ func (m Model) View() string {
 
 	version := lipgloss.NewStyle().
 		Foreground(style.Muted).
-		Render(" v0.1.0")
+		Render(" v0.2.0")
 
 	b.WriteString(title + version)
 	b.WriteString("\n")
@@ -160,6 +178,8 @@ func (m Model) View() string {
 		content = m.wifi.View()
 	case TabIfaces:
 		content = m.iface.View()
+	case TabDNS:
+		content = m.dns.View()
 	case TabMonitor:
 		content = m.monitor.View()
 	}
@@ -171,11 +191,12 @@ func (m Model) View() string {
 	b.WriteString(panelStyle.Render(content))
 
 	b.WriteString("\n")
-	statusBar := fmt.Sprintf(" %s tab  %s/%s/%s panels  %s quit",
+	statusBar := fmt.Sprintf(" %s tab  %s/%s/%s/%s panels  %s quit",
 		style.HelpKeyStyle.Render("Tab"),
 		style.HelpKeyStyle.Render("1"),
 		style.HelpKeyStyle.Render("2"),
 		style.HelpKeyStyle.Render("3"),
+		style.HelpKeyStyle.Render("4"),
 		style.HelpKeyStyle.Render("q"),
 	)
 	b.WriteString(lipgloss.NewStyle().Foreground(style.Muted).Render(statusBar))

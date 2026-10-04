@@ -153,7 +153,13 @@ func (p IfacePanel) refresh() tea.Msg {
 	if err != nil {
 		return devicesRefreshMsg{err: err}
 	}
-	return devicesRefreshMsg{devices: devices}
+	var filtered []nm.Device
+	for _, d := range devices {
+		if d.Name != "lo" {
+			filtered = append(filtered, d)
+		}
+	}
+	return devicesRefreshMsg{devices: filtered}
 }
 
 func (p IfacePanel) activateDevice(dev nm.Device) func() tea.Msg {

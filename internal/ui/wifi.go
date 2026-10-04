@@ -12,6 +12,13 @@ import (
 	"github.com/godbus/dbus/v5"
 )
 
+type wifiMode int
+
+const (
+	wifiModeList wifiMode = iota
+	wifiModePassword
+)
+
 type WiFiPanel struct {
 	client       *nm.Client
 	accessPoints []nm.AccessPoint
@@ -20,6 +27,10 @@ type WiFiPanel struct {
 	height       int
 	scanning     bool
 	err          error
+	mode         wifiMode
+	targetAP     *nm.AccessPoint
+	password     string
+	showPassword bool
 }
 
 type scanCompleteMsg struct {
@@ -53,35 +64,81 @@ func (w WiFiPanel) Update(msg tea.Msg) (WiFiPanel, tea.Cmd) {
 
 	case connectResultMsg:
 		w.err = msg.err
+		w.mode = wifiModeList
+		w.password = ""
+		w.targetAP = nil
 		return w, w.scan
 
 	case tea.KeyMsg:
-		switch msg.String() {
-		case "j", "down":
-			if w.cursor < len(w.accessPoints)-1 {
-				w.cursor++
-			}
-		case "k", "up":
-			if w.cursor > 0 {
-				w.cursor--
-			}
-		case "s":
-			w.scanning = true
-			return w, w.scan
-		case "enter":
-			if len(w.accessPoints) > 0 && w.cursor < len(w.accessPoints) {
-				ap := w.accessPoints[w.cursor]
-				if !ap.Active {
-					return w, w.connectAP(ap)
+		if w.mode == wifiModePassword {
+			return w.updatePasswordMode(msg)
+		}
+		return w.updateListMode(msg)
+	}
+	return w, nil
+}
+
+func (w WiFiPanel) updateListMode(msg tea.KeyMsg) (WiFiPanel, tea.Cmd) {
+	switch msg.String() {
+	case "j", "down":
+		if w.cursor < len(w.accessPoints)-1 {
+			w.cursor++
+		}
+	case "k", "up":
+		if w.cursor > 0 {
+			w.cursor--
+		}
+	case "s":
+		w.scanning = true
+		return w, w.scan
+	case "enter":
+		if len(w.accessPoints) > 0 && w.cursor < len(w.accessPoints) {
+			ap := w.accessPoints[w.cursor]
+			if !ap.Active {
+				if ap.Security != "Open" {
+					w.mode = wifiModePassword
+					w.targetAP = &ap
+					w.password = ""
+					w.err = nil
+				} else {
+					return w, w.connectAP(ap, "")
 				}
 			}
-		case "d":
-			if len(w.accessPoints) > 0 && w.cursor < len(w.accessPoints) {
-				ap := w.accessPoints[w.cursor]
-				if ap.Active {
-					return w, w.disconnectAP()
-				}
+		}
+	case "d":
+		if len(w.accessPoints) > 0 && w.cursor < len(w.accessPoints) {
+			ap := w.accessPoints[w.cursor]
+			if ap.Active {
+				return w, w.disconnectAP()
 			}
+		}
+	}
+	return w, nil
+}
+
+func (w WiFiPanel) updatePasswordMode(msg tea.KeyMsg) (WiFiPanel, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		w.mode = wifiModeList
+		w.password = ""
+		w.targetAP = nil
+	case "enter":
+		if w.targetAP != nil && len(w.password) >= 8 {
+			ap := *w.targetAP
+			pwd := w.password
+			return w, w.connectAP(ap, pwd)
+		} else if len(w.password) < 8 {
+			w.err = fmt.Errorf("password must be at least 8 characters")
+		}
+	case "backspace":
+		if len(w.password) > 0 {
+			w.password = w.password[:len(w.password)-1]
+		}
+	case "ctrl+t":
+		w.showPassword = !w.showPassword
+	default:
+		if len(msg.String()) == 1 {
+			w.password += msg.String()
 		}
 	}
 	return w, nil
@@ -93,6 +150,10 @@ func (w WiFiPanel) View() string {
 	header := style.TitleStyle.Render("📡 WiFi Networks")
 	b.WriteString(header)
 	b.WriteString("\n\n")
+
+	if w.mode == wifiModePassword {
+		return b.String() + w.passwordView()
+	}
 
 	if w.scanning {
 		b.WriteString(style.SubtitleStyle.Render("Scanning..."))
@@ -158,6 +219,44 @@ func (w WiFiPanel) View() string {
 	return b.String()
 }
 
+func (w WiFiPanel) passwordView() string {
+	var b strings.Builder
+
+	ssid := lipgloss.NewStyle().Bold(true).Foreground(style.Primary).Render(w.targetAP.SSID)
+	b.WriteString(fmt.Sprintf("Connect to %s\n\n", ssid))
+
+	label := lipgloss.NewStyle().Foreground(style.Muted).Render("Password: ")
+	display := strings.Repeat("•", len(w.password))
+	if w.showPassword {
+		display = w.password
+	}
+	cursor := lipgloss.NewStyle().Foreground(style.Primary).Render("█")
+	b.WriteString(label + display + cursor)
+	b.WriteString("\n")
+
+	if len(w.password) > 0 && len(w.password) < 8 {
+		b.WriteString(lipgloss.NewStyle().Foreground(style.Warning).Render(
+			fmt.Sprintf("  %d/8 characters minimum", len(w.password)),
+		))
+		b.WriteString("\n")
+	}
+
+	if w.err != nil {
+		b.WriteString(lipgloss.NewStyle().Foreground(style.Danger).Render(fmt.Sprintf("  %v", w.err)))
+		b.WriteString("\n")
+	}
+
+	b.WriteString("\n")
+	help := fmt.Sprintf("%s connect  %s cancel  %s show/hide password",
+		style.HelpKeyStyle.Render("↵"),
+		style.HelpKeyStyle.Render("Esc"),
+		style.HelpKeyStyle.Render("Ctrl+T"),
+	)
+	b.WriteString(help)
+
+	return b.String()
+}
+
 func (w *WiFiPanel) SetSize(width, height int) {
 	w.width = width
 	w.height = height
@@ -193,7 +292,7 @@ func (w WiFiPanel) scan() tea.Msg {
 	return scanCompleteMsg{err: fmt.Errorf("no WiFi device found")}
 }
 
-func (w WiFiPanel) connectAP(ap nm.AccessPoint) func() tea.Msg {
+func (w WiFiPanel) connectAP(ap nm.AccessPoint, password string) func() tea.Msg {
 	return func() tea.Msg {
 		devices, err := w.client.GetDevices()
 		if err != nil {
@@ -202,7 +301,7 @@ func (w WiFiPanel) connectAP(ap nm.AccessPoint) func() tea.Msg {
 
 		for _, dev := range devices {
 			if dev.Type == nm.DeviceTypeWiFi {
-				settings := makeWiFiSettings(ap)
+				settings := makeWiFiSettings(ap, password)
 				err := w.client.AddAndActivateConnection(settings, dev.Path, ap.Path)
 				return connectResultMsg{err: err}
 			}
@@ -232,7 +331,7 @@ func (w WiFiPanel) disconnectAP() func() tea.Msg {
 	}
 }
 
-func makeWiFiSettings(ap nm.AccessPoint) map[string]map[string]dbus.Variant {
+func makeWiFiSettings(ap nm.AccessPoint, password string) map[string]map[string]dbus.Variant {
 	settings := map[string]map[string]dbus.Variant{
 		"connection": {
 			"type": dbus.MakeVariant("802-11-wireless"),
@@ -244,9 +343,10 @@ func makeWiFiSettings(ap nm.AccessPoint) map[string]map[string]dbus.Variant {
 		},
 	}
 
-	if ap.Security != "Open" {
+	if ap.Security != "Open" && password != "" {
 		settings["802-11-wireless-security"] = map[string]dbus.Variant{
 			"key-mgmt": dbus.MakeVariant("wpa-psk"),
+			"psk":      dbus.MakeVariant(password),
 		}
 	}
 
