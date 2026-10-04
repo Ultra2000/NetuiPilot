@@ -87,6 +87,9 @@ func (p IfacePanel) View() string {
 
 	header := style.TitleStyle.Render("🔌 Interfaces")
 	b.WriteString(header)
+	b.WriteString("\n")
+	desc := lipgloss.NewStyle().Foreground(style.Muted).Render("Network interfaces — toggle virtual (docker, veth, bridge) with 'v'")
+	b.WriteString(desc)
 	b.WriteString("\n\n")
 
 	if p.err != nil {

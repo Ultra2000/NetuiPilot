@@ -149,6 +149,9 @@ func (w WiFiPanel) View() string {
 
 	header := style.TitleStyle.Render("📡 WiFi Networks")
 	b.WriteString(header)
+	b.WriteString("\n")
+	desc := lipgloss.NewStyle().Foreground(style.Muted).Render("Scan, connect and manage nearby wireless networks")
+	b.WriteString(desc)
 	b.WriteString("\n\n")
 
 	if w.mode == wifiModePassword {

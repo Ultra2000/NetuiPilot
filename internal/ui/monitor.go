@@ -82,6 +82,9 @@ func (m MonitorPanel) View() string {
 
 	header := style.TitleStyle.Render("📊 Bandwidth Monitor")
 	b.WriteString(header)
+	b.WriteString("\n")
+	desc := lipgloss.NewStyle().Foreground(style.Muted).Render("Real-time bandwidth usage with sparkline graphs per interface")
+	b.WriteString(desc)
 	b.WriteString("\n\n")
 
 	if m.err != nil {

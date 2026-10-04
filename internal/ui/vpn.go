@@ -86,6 +86,9 @@ func (v VPNPanel) View() string {
 
 	header := style.TitleStyle.Render("🔒 VPN")
 	b.WriteString(header)
+	b.WriteString("\n")
+	desc := lipgloss.NewStyle().Foreground(style.Muted).Render("Toggle WireGuard and OpenVPN connections on/off")
+	b.WriteString(desc)
 	b.WriteString("\n\n")
 
 	if v.err != nil {

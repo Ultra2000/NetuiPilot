@@ -171,6 +171,9 @@ func (d DNSPanel) View() string {
 
 	header := style.TitleStyle.Render("🌐 DNS Resolvers")
 	b.WriteString(header)
+	b.WriteString("\n")
+	desc := lipgloss.NewStyle().Foreground(style.Muted).Render("View, change or reset DNS servers per interface via resolvectl")
+	b.WriteString(desc)
 	b.WriteString("\n\n")
 
 	if d.mode == dnsModeChange {

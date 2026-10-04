@@ -119,6 +119,9 @@ func (c ConnsPanel) View() string {
 	header := style.TitleStyle.Render("🔗 Connections")
 	b.WriteString(header)
 	b.WriteString("\n")
+	desc := lipgloss.NewStyle().Foreground(style.Muted).Render("Active TCP/UDP sockets — like ss/netstat in your terminal")
+	b.WriteString(desc)
+	b.WriteString("\n")
 
 	filterLabel := lipgloss.NewStyle().Foreground(style.Muted).Render("Filter: ")
 	filterValue := lipgloss.NewStyle().Foreground(style.Primary).Bold(true).Render(connFilterNames[c.filter])

@@ -105,6 +105,9 @@ func (r RescuePanel) View() string {
 
 	header := style.TitleStyle.Render("🩺 NetRescue")
 	b.WriteString(header)
+	b.WriteString("\n")
+	desc := lipgloss.NewStyle().Foreground(style.Muted).Render("Diagnose connectivity issues — ping, DNS, TLS, firewall checks")
+	b.WriteString(desc)
 	b.WriteString("\n\n")
 
 	switch r.mode {
