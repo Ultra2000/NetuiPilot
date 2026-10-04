@@ -7,6 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/Ultra2000/netuipilot/internal/config"
+	"github.com/Ultra2000/netuipilot/internal/net"
 	"github.com/Ultra2000/netuipilot/internal/nm"
 	"github.com/Ultra2000/netuipilot/internal/style"
 )
@@ -21,10 +22,11 @@ const (
 	TabConns
 	TabMonitor
 	TabRescue
-	tabCount = 7
+	TabProfiles
+	tabCount = 8
 )
 
-var tabNames = []string{"WiFi", "Interfaces", "VPN", "DNS", "Conns", "Monitor", "Rescue"}
+var tabNames = []string{"WiFi", "Interfaces", "VPN", "DNS", "Conns", "Monitor", "Rescue", "Profiles"}
 
 type Model struct {
 	client    *nm.Client
@@ -36,6 +38,7 @@ type Model struct {
 	conns     ConnsPanel
 	monitor   MonitorPanel
 	rescue    RescuePanel
+	profiles  ProfilesPanel
 	notify    *NotifyManager
 	cfg       config.Config
 	version   string
@@ -60,6 +63,7 @@ func NewModel(version string, cfg config.Config) Model {
 		m.wifi = NewWiFiPanel(client)
 		m.iface = NewIfacePanel(client, cfg)
 		m.vpn = NewVPNPanel(client)
+		m.profiles = NewProfilesPanel(client, cfg)
 	}
 	m.dns = NewDNSPanel()
 	m.conns = NewConnsPanel()
@@ -84,6 +88,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.String() != "q" && msg.String() != "ctrl+c" {
 				var cmd tea.Cmd
 				m.wifi, cmd = m.wifi.Update(msg)
+				return m, cmd
+			}
+		}
+
+		if m.activeTab == TabProfiles && (m.profiles.mode == profileModeCreateField) {
+			if msg.String() != "q" && msg.String() != "ctrl+c" {
+				var cmd tea.Cmd
+				m.profiles, cmd = m.profiles.Update(msg)
 				return m, cmd
 			}
 		}
@@ -137,6 +149,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "7":
 			m.activeTab = TabRescue
 			return m, nil
+		case "8":
+			m.activeTab = TabProfiles
+			return m, nil
 		}
 
 	case tea.WindowSizeMsg:
@@ -150,6 +165,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.conns.SetSize(msg.Width-4, contentHeight)
 		m.monitor.SetSize(msg.Width-4, contentHeight)
 		m.rescue.SetSize(msg.Width-4, contentHeight)
+		m.profiles.SetSize(msg.Width-4, contentHeight)
 		return m, nil
 
 	case MonitorTickMsg, MonitorDataMsg:
@@ -161,12 +177,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err == nil {
 			m.notify.CheckDevices(msg.devices)
 		}
-		if m.activeTab == TabIfaces {
-			var cmd tea.Cmd
-			m.iface, cmd = m.iface.Update(msg)
-			return m, cmd
-		}
-		return m, nil
+		var cmd tea.Cmd
+		m.iface, cmd = m.iface.Update(msg)
+		return m, cmd
 	}
 
 	var cmd tea.Cmd
@@ -185,6 +198,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.monitor, cmd = m.monitor.Update(msg)
 	case TabRescue:
 		m.rescue, cmd = m.rescue.Update(msg)
+	case TabProfiles:
+		m.profiles, cmd = m.profiles.Update(msg)
 	}
 
 	return m, cmd
@@ -205,6 +220,8 @@ func (m Model) View() string {
 	notifyBar := m.notify.RenderBar()
 
 	b.WriteString(title + version + notifyBar)
+	b.WriteString("\n")
+	b.WriteString(m.renderStatusBar())
 	b.WriteString("\n")
 
 	var tabs []string
@@ -251,6 +268,8 @@ func (m Model) View() string {
 		content = m.monitor.View()
 	case TabRescue:
 		content = m.rescue.View()
+	case TabProfiles:
+		content = m.profiles.View()
 	}
 
 	panelStyle := style.PanelStyle
@@ -263,12 +282,72 @@ func (m Model) View() string {
 	statusBar := fmt.Sprintf(" %s tab  %s-%s panels  %s quit",
 		style.HelpKeyStyle.Render("Tab"),
 		style.HelpKeyStyle.Render("1"),
-		style.HelpKeyStyle.Render("7"),
+		style.HelpKeyStyle.Render("8"),
 		style.HelpKeyStyle.Render("q"),
 	)
 	b.WriteString(lipgloss.NewStyle().Foreground(style.Muted).Render(statusBar))
 
 	return b.String()
+}
+
+func (m Model) renderStatusBar() string {
+	sep := lipgloss.NewStyle().Foreground(style.Subtle).Render(" │ ")
+	var parts []string
+
+	activeIface := "none"
+	if len(m.iface.devices) > 0 {
+		for _, dev := range m.iface.devices {
+			if dev.State == nm.DeviceStateActivated {
+				activeIface = dev.Name
+				break
+			}
+		}
+	}
+	if activeIface != "none" {
+		parts = append(parts, lipgloss.NewStyle().Foreground(style.Success).Render("●")+" "+activeIface+" "+lipgloss.NewStyle().Foreground(style.Success).Render("↑"))
+	} else {
+		parts = append(parts, lipgloss.NewStyle().Foreground(style.Danger).Render("●")+" net "+lipgloss.NewStyle().Foreground(style.Danger).Render("↓"))
+	}
+
+	if len(m.dns.entries) > 0 {
+		parts = append(parts, "DNS "+lipgloss.NewStyle().Foreground(style.Success).Render("✓"))
+	} else {
+		parts = append(parts, "DNS "+lipgloss.NewStyle().Foreground(style.Danger).Render("✗"))
+	}
+
+	hasVPN := false
+	for _, entry := range m.vpn.entries {
+		if entry.active {
+			hasVPN = true
+			break
+		}
+	}
+	if hasVPN {
+		parts = append(parts, "VPN "+lipgloss.NewStyle().Foreground(style.Success).Render("✓"))
+	} else {
+		parts = append(parts, "VPN "+lipgloss.NewStyle().Foreground(style.Muted).Render("✗"))
+	}
+
+	if len(m.monitor.stats) > 0 && len(m.monitor.trackers) > 0 {
+		var totalRX, totalTX float64
+		for _, s := range m.monitor.stats {
+			tracker := m.monitor.trackers[s.Name]
+			if tracker != nil && len(tracker.History) > 0 {
+				last := tracker.History[len(tracker.History)-1]
+				totalRX += last.RXBytesPS
+				totalTX += last.TXBytesPS
+			}
+		}
+		bw := fmt.Sprintf("%s %s  %s %s",
+			lipgloss.NewStyle().Foreground(style.Secondary).Render("↓"),
+			net.FormatBytesPerSec(totalRX),
+			lipgloss.NewStyle().Foreground(style.Accent).Render("↑"),
+			net.FormatBytesPerSec(totalTX),
+		)
+		parts = append(parts, bw)
+	}
+
+	return lipgloss.NewStyle().Foreground(style.Muted).Render(" ") + strings.Join(parts, sep)
 }
 
 func max(a, b int) int {

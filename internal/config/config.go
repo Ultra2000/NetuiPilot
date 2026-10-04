@@ -6,10 +6,19 @@ import (
 	"path/filepath"
 )
 
+type Profile struct {
+	Name      string   `json:"name"`
+	WiFiSSID  string   `json:"wifi_ssid,omitempty"`
+	DNSServers []string `json:"dns_servers,omitempty"`
+	DNSIface  string   `json:"dns_iface,omitempty"`
+	VPNName   string   `json:"vpn_name,omitempty"`
+}
+
 type Config struct {
-	HiddenInterfaces []string `json:"hidden_interfaces"`
-	RefreshInterval  int      `json:"refresh_interval_ms"`
-	Theme            Theme    `json:"theme"`
+	HiddenInterfaces []string  `json:"hidden_interfaces"`
+	RefreshInterval  int       `json:"refresh_interval_ms"`
+	Theme            Theme     `json:"theme"`
+	Profiles         []Profile `json:"profiles,omitempty"`
 }
 
 type Theme struct {
