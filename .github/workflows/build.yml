@@ -1,0 +1,29 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Install D-Bus dev headers
+        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev
+
+      - name: Download dependencies
+        run: go mod tidy
+
+      - name: Build
+        run: go build -v ./cmd/netuipilot/
+
+      - name: Vet
+        run: go vet ./...
