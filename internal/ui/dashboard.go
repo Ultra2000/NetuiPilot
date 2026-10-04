@@ -19,10 +19,11 @@ const (
 	TabVPN
 	TabDNS
 	TabMonitor
-	tabCount = 5
+	TabRescue
+	tabCount = 6
 )
 
-var tabNames = []string{"WiFi", "Interfaces", "VPN", "DNS", "Monitor"}
+var tabNames = []string{"WiFi", "Interfaces", "VPN", "DNS", "Monitor", "Rescue"}
 
 type Model struct {
 	client    *nm.Client
@@ -32,6 +33,7 @@ type Model struct {
 	vpn       VPNPanel
 	dns       DNSPanel
 	monitor   MonitorPanel
+	rescue    RescuePanel
 	notify    *NotifyManager
 	cfg       config.Config
 	version   string
@@ -59,6 +61,7 @@ func NewModel(version string, cfg config.Config) Model {
 	}
 	m.dns = NewDNSPanel()
 	m.monitor = NewMonitorPanel()
+	m.rescue = NewRescuePanel()
 
 	return m
 }
@@ -78,6 +81,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.String() != "q" && msg.String() != "ctrl+c" {
 				var cmd tea.Cmd
 				m.wifi, cmd = m.wifi.Update(msg)
+				return m, cmd
+			}
+		}
+
+		if m.activeTab == TabRescue && m.rescue.mode != rescueModeResults {
+			if msg.String() != "q" && msg.String() != "ctrl+c" {
+				var cmd tea.Cmd
+				m.rescue, cmd = m.rescue.Update(msg)
 				return m, cmd
 			}
 		}
@@ -109,6 +120,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "5":
 			m.activeTab = TabMonitor
 			return m, nil
+		case "6":
+			m.activeTab = TabRescue
+			return m, nil
 		}
 
 	case tea.WindowSizeMsg:
@@ -120,6 +134,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.vpn.SetSize(msg.Width-4, contentHeight)
 		m.dns.SetSize(msg.Width-4, contentHeight)
 		m.monitor.SetSize(msg.Width-4, contentHeight)
+		m.rescue.SetSize(msg.Width-4, contentHeight)
 		return m, nil
 
 	case MonitorTickMsg, MonitorDataMsg:
@@ -151,6 +166,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.dns, cmd = m.dns.Update(msg)
 	case TabMonitor:
 		m.monitor, cmd = m.monitor.Update(msg)
+	case TabRescue:
+		m.rescue, cmd = m.rescue.Update(msg)
 	}
 
 	return m, cmd
@@ -213,6 +230,8 @@ func (m Model) View() string {
 		content = m.dns.View()
 	case TabMonitor:
 		content = m.monitor.View()
+	case TabRescue:
+		content = m.rescue.View()
 	}
 
 	panelStyle := style.PanelStyle
@@ -225,7 +244,7 @@ func (m Model) View() string {
 	statusBar := fmt.Sprintf(" %s tab  %s-%s panels  %s quit",
 		style.HelpKeyStyle.Render("Tab"),
 		style.HelpKeyStyle.Render("1"),
-		style.HelpKeyStyle.Render("5"),
+		style.HelpKeyStyle.Render("6"),
 		style.HelpKeyStyle.Render("q"),
 	)
 	b.WriteString(lipgloss.NewStyle().Foreground(style.Muted).Render(statusBar))
