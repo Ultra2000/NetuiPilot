@@ -16,9 +16,8 @@ var (
 )
 
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "--version" {
-		fmt.Printf("netuipilot %s (%s)\n", version, commit)
-		return
+	if handled, code := runCLI(os.Args[1:]); handled {
+		os.Exit(code)
 	}
 
 	cfg := config.Load()
