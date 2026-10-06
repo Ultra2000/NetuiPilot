@@ -359,6 +359,37 @@ func (c *Client) DeleteConnection(connPath dbus.ObjectPath) error {
 	return obj.Call(nmSettingsConn+".Delete", 0).Err
 }
 
+// GetWiFiPassword returns the PSK for a saved WiFi connection by SSID.
+// Requires root/authorization to read secrets from the keyring.
+func (c *Client) GetWiFiPassword(ssid string) (string, error) {
+	conns, err := c.GetSavedConnections()
+	if err != nil {
+		return "", err
+	}
+
+	for _, conn := range conns {
+		if conn.ID != ssid || conn.Type != "802-11-wireless" {
+			continue
+		}
+
+		obj := c.conn.Object(nmBus, conn.Path)
+		var secrets map[string]map[string]dbus.Variant
+		err := obj.Call(nmSettingsConn+".GetSecrets", 0, "802-11-wireless-security").Store(&secrets)
+		if err != nil {
+			return "", fmt.Errorf("failed to read secrets: %w", err)
+		}
+
+		if sec, ok := secrets["802-11-wireless-security"]; ok {
+			if psk, ok := sec["psk"]; ok {
+				return psk.Value().(string), nil
+			}
+		}
+		return "", fmt.Errorf("no password stored for %s", ssid)
+	}
+
+	return "", fmt.Errorf("no saved connection for %s", ssid)
+}
+
 // ActiveConnection represents a currently active connection.
 type ActiveConnection struct {
 	Path dbus.ObjectPath

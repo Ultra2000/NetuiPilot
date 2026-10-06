@@ -7,4 +7,5 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/godbus/dbus/v5 v5.1.0
 	github.com/charmbracelet/bubbles v0.20.0
+	github.com/mdp/qrterminal/v3 v3.2.0
 )

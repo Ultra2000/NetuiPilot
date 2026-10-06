@@ -1,12 +1,14 @@
 package ui
 
 import (
+	"bytes"
 	"fmt"
 	"sort"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mdp/qrterminal/v3"
 	"github.com/Ultra2000/netuipilot/internal/nm"
 	"github.com/Ultra2000/netuipilot/internal/style"
 	"github.com/godbus/dbus/v5"
@@ -17,6 +19,7 @@ type wifiMode int
 const (
 	wifiModeList wifiMode = iota
 	wifiModePassword
+	wifiModeQR
 )
 
 type WiFiPanel struct {
@@ -31,6 +34,8 @@ type WiFiPanel struct {
 	targetAP     *nm.AccessPoint
 	password     string
 	showPassword bool
+	qrContent    string
+	qrSSID       string
 }
 
 type scanCompleteMsg struct {
@@ -40,6 +45,12 @@ type scanCompleteMsg struct {
 
 type connectResultMsg struct {
 	err error
+}
+
+type qrResultMsg struct {
+	ssid    string
+	content string
+	err     error
 }
 
 func NewWiFiPanel(client *nm.Client) WiFiPanel {
@@ -69,9 +80,23 @@ func (w WiFiPanel) Update(msg tea.Msg) (WiFiPanel, tea.Cmd) {
 		w.targetAP = nil
 		return w, w.scan
 
+	case qrResultMsg:
+		w.err = msg.err
+		if msg.err == nil {
+			w.mode = wifiModeQR
+			w.qrContent = msg.content
+			w.qrSSID = msg.ssid
+		}
+		return w, nil
+
 	case tea.KeyMsg:
 		if w.mode == wifiModePassword {
 			return w.updatePasswordMode(msg)
+		}
+		if w.mode == wifiModeQR {
+			w.mode = wifiModeList
+			w.qrContent = ""
+			return w, nil
 		}
 		return w.updateListMode(msg)
 	}
@@ -111,6 +136,11 @@ func (w WiFiPanel) updateListMode(msg tea.KeyMsg) (WiFiPanel, tea.Cmd) {
 			if ap.Active {
 				return w, w.disconnectAP()
 			}
+		}
+	case "Q":
+		if len(w.accessPoints) > 0 && w.cursor < len(w.accessPoints) {
+			ap := w.accessPoints[w.cursor]
+			return w, w.generateQR(ap)
 		}
 	}
 	return w, nil
@@ -156,6 +186,10 @@ func (w WiFiPanel) View() string {
 
 	if w.mode == wifiModePassword {
 		return b.String() + w.passwordView()
+	}
+
+	if w.mode == wifiModeQR {
+		return b.String() + w.qrView()
 	}
 
 	if w.scanning {
@@ -210,14 +244,29 @@ func (w WiFiPanel) View() string {
 	}
 
 	b.WriteString("\n")
-	help := fmt.Sprintf("%s scan  %s connect  %s disconnect  %s/%s navigate",
+	help := fmt.Sprintf("%s scan  %s connect  %s disconnect  %s share QR  %s/%s navigate",
 		style.HelpKeyStyle.Render("s"),
 		style.HelpKeyStyle.Render("↵"),
 		style.HelpKeyStyle.Render("d"),
+		style.HelpKeyStyle.Render("Q"),
 		style.HelpKeyStyle.Render("j"),
 		style.HelpKeyStyle.Render("k"),
 	)
 	b.WriteString(help)
+
+	return b.String()
+}
+
+func (w WiFiPanel) qrView() string {
+	var b strings.Builder
+
+	ssid := lipgloss.NewStyle().Bold(true).Foreground(style.Primary).Render(w.qrSSID)
+	b.WriteString(fmt.Sprintf("Scan to join %s\n\n", ssid))
+	b.WriteString(w.qrContent)
+	b.WriteString("\n")
+	b.WriteString(lipgloss.NewStyle().Foreground(style.Muted).Render("Scan with a phone camera to connect."))
+	b.WriteString("\n\n")
+	b.WriteString(fmt.Sprintf("%s back", style.HelpKeyStyle.Render("any key")))
 
 	return b.String()
 }
@@ -332,6 +381,42 @@ func (w WiFiPanel) disconnectAP() func() tea.Msg {
 		}
 		return connectResultMsg{err: fmt.Errorf("no active WiFi connection")}
 	}
+}
+
+func (w WiFiPanel) generateQR(ap nm.AccessPoint) func() tea.Msg {
+	return func() tea.Msg {
+		password := ""
+		auth := "nopass"
+
+		if ap.Security != "Open" {
+			if w.client == nil {
+				return qrResultMsg{err: fmt.Errorf("no NetworkManager connection")}
+			}
+			pw, err := w.client.GetWiFiPassword(ap.SSID)
+			if err != nil {
+				return qrResultMsg{err: fmt.Errorf("cannot read password (connect first, run as root): %w", err)}
+			}
+			password = pw
+			auth = "WPA"
+		}
+
+		content := fmt.Sprintf("WIFI:T:%s;S:%s;P:%s;;",
+			auth,
+			escapeQR(ap.SSID),
+			escapeQR(password),
+		)
+
+		var buf bytes.Buffer
+		qrterminal.GenerateHalfBlock(content, qrterminal.M, &buf)
+
+		return qrResultMsg{ssid: ap.SSID, content: buf.String()}
+	}
+}
+
+// escapeQR escapes special characters in WiFi QR strings per the spec.
+func escapeQR(s string) string {
+	replacer := strings.NewReplacer(`\`, `\\`, `;`, `\;`, `,`, `\,`, `:`, `\:`, `"`, `\"`)
+	return replacer.Replace(s)
 }
 
 func makeWiFiSettings(ap nm.AccessPoint, password string) map[string]map[string]dbus.Variant {
