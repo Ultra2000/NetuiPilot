@@ -4,8 +4,10 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -195,6 +197,8 @@ type SocketEntry struct {
 	RemotePort uint16
 	State    string
 	Inode    string
+	PID      int
+	Process  string
 }
 
 var tcpStates = map[string]string{
@@ -232,7 +236,94 @@ func GetDetailedConnections() ([]SocketEntry, error) {
 		entries = append(entries, parsed...)
 	}
 
+	resolveProcesses(entries)
+
 	return entries, nil
+}
+
+// resolveProcesses maps socket inodes to owning PID/process by scanning /proc.
+func resolveProcesses(entries []SocketEntry) {
+	inodeToPID := buildInodeMap()
+	if len(inodeToPID) == 0 {
+		return
+	}
+	for i := range entries {
+		if pi, ok := inodeToPID[entries[i].Inode]; ok {
+			entries[i].PID = pi.pid
+			entries[i].Process = pi.name
+		}
+	}
+}
+
+type procInfo struct {
+	pid  int
+	name string
+}
+
+// buildInodeMap scans /proc/<pid>/fd/* for socket:[inode] links.
+func buildInodeMap() map[string]procInfo {
+	result := make(map[string]procInfo)
+
+	procDir, err := os.Open("/proc")
+	if err != nil {
+		return result
+	}
+	defer procDir.Close()
+
+	names, err := procDir.Readdirnames(-1)
+	if err != nil {
+		return result
+	}
+
+	for _, name := range names {
+		pid, err := strconv.Atoi(name)
+		if err != nil {
+			continue
+		}
+
+		fdDir := fmt.Sprintf("/proc/%d/fd", pid)
+		fds, err := os.ReadDir(fdDir)
+		if err != nil {
+			continue
+		}
+
+		procName := ""
+		for _, fd := range fds {
+			link, err := os.Readlink(filepath.Join(fdDir, fd.Name()))
+			if err != nil {
+				continue
+			}
+			if strings.HasPrefix(link, "socket:[") {
+				inode := strings.TrimSuffix(strings.TrimPrefix(link, "socket:["), "]")
+				if procName == "" {
+					procName = readProcName(pid)
+				}
+				result[inode] = procInfo{pid: pid, name: procName}
+			}
+		}
+	}
+
+	return result
+}
+
+func readProcName(pid int) string {
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/comm", pid))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+// KillProcess sends SIGTERM to the given PID.
+func KillProcess(pid int) error {
+	if pid <= 0 {
+		return fmt.Errorf("invalid pid")
+	}
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return err
+	}
+	return proc.Signal(syscall.SIGTERM)
 }
 
 func parseNetFile(path, proto string, ipv6 bool) ([]SocketEntry, error) {

@@ -21,18 +21,26 @@ const (
 var connFilterNames = []string{"All", "Established", "Listening"}
 
 type ConnsPanel struct {
-	entries  []net.SocketEntry
-	filtered []net.SocketEntry
-	filter   connFilter
-	cursor   int
-	offset   int
-	width    int
-	height   int
-	err      error
+	entries     []net.SocketEntry
+	filtered    []net.SocketEntry
+	filter      connFilter
+	cursor      int
+	offset      int
+	killConfirm bool
+	status      string
+	width       int
+	height      int
+	err         error
 }
 
 type connsRefreshMsg struct {
 	entries []net.SocketEntry
+	err     error
+}
+
+type connKillMsg struct {
+	pid     int
+	process string
 	err     error
 }
 
@@ -55,6 +63,18 @@ func (c ConnsPanel) Update(msg tea.Msg) (ConnsPanel, tea.Cmd) {
 		return c, nil
 
 	case tea.KeyMsg:
+		if c.killConfirm {
+			switch msg.String() {
+			case "y":
+				c.killConfirm = false
+				return c, c.killSelected()
+			default:
+				c.killConfirm = false
+				c.status = ""
+				return c, nil
+			}
+		}
+
 		switch msg.String() {
 		case "j", "down":
 			if c.cursor < len(c.filtered)-1 {
@@ -67,13 +87,32 @@ func (c ConnsPanel) Update(msg tea.Msg) (ConnsPanel, tea.Cmd) {
 				c.adjustScroll()
 			}
 		case "r":
+			c.status = ""
 			return c, c.refresh
 		case "f":
 			c.filter = (c.filter + 1) % 3
 			c.cursor = 0
 			c.offset = 0
+			c.status = ""
 			c.applyFilter()
+		case "K":
+			if c.cursor < len(c.filtered) {
+				e := c.filtered[c.cursor]
+				if e.PID > 0 {
+					c.killConfirm = true
+				} else {
+					c.status = "No process owner found (try running as root)"
+				}
+			}
 		}
+
+	case connKillMsg:
+		if msg.err != nil {
+			c.status = fmt.Sprintf("Kill failed: %v", msg.err)
+		} else {
+			c.status = fmt.Sprintf("Sent SIGTERM to %s (pid %d)", msg.process, msg.pid)
+		}
+		return c, c.refresh
 	}
 	return c, nil
 }
@@ -142,7 +181,7 @@ func (c ConnsPanel) View() string {
 	}
 
 	headerRow := style.HeaderStyle.Render(
-		fmt.Sprintf("  %-6s %-22s %-22s %-12s", "PROTO", "LOCAL", "REMOTE", "STATE"),
+		fmt.Sprintf("  %-6s %-22s %-22s %-11s %s", "PROTO", "LOCAL", "REMOTE", "STATE", "PROCESS"),
 	)
 	b.WriteString(headerRow)
 	b.WriteString("\n")
@@ -162,23 +201,30 @@ func (c ConnsPanel) View() string {
 			remote = "*"
 		}
 
-		stateStyled := e.State
+		stateColor := style.Muted
 		switch e.State {
 		case "ESTABLISHED":
-			stateStyled = lipgloss.NewStyle().Foreground(style.Success).Render(e.State)
+			stateColor = style.Success
 		case "LISTEN":
-			stateStyled = lipgloss.NewStyle().Foreground(style.Secondary).Render(e.State)
+			stateColor = style.Secondary
 		case "TIME_WAIT", "CLOSE_WAIT":
-			stateStyled = lipgloss.NewStyle().Foreground(style.Warning).Render(e.State)
+			stateColor = style.Warning
 		case "SYN_SENT", "SYN_RECV":
-			stateStyled = lipgloss.NewStyle().Foreground(style.Accent).Render(e.State)
+			stateColor = style.Accent
+		}
+		stateStyled := lipgloss.NewStyle().Foreground(stateColor).Width(11).Render(e.State)
+
+		proc := ""
+		if e.PID > 0 {
+			proc = fmt.Sprintf("%s (%d)", e.Process, e.PID)
 		}
 
-		row := fmt.Sprintf("  %-6s %-22s %-22s %-12s",
+		row := fmt.Sprintf("  %-6s %-22s %-22s %s %s",
 			e.Proto,
 			local,
 			remote,
 			stateStyled,
+			proc,
 		)
 
 		if i == c.cursor {
@@ -199,10 +245,25 @@ func (c ConnsPanel) View() string {
 	}
 
 	b.WriteString("\n")
-	help := fmt.Sprintf("%s refresh  %s filter (%s)  %s/%s navigate",
+
+	if c.killConfirm && c.cursor < len(c.filtered) {
+		e := c.filtered[c.cursor]
+		confirm := lipgloss.NewStyle().Foreground(style.Warning).Bold(true).Render(
+			fmt.Sprintf("Kill %s (pid %d)? Press %s to confirm, any key to cancel",
+				e.Process, e.PID, lipgloss.NewStyle().Foreground(style.Danger).Render("y")),
+		)
+		b.WriteString(confirm)
+		b.WriteString("\n")
+	} else if c.status != "" {
+		b.WriteString(lipgloss.NewStyle().Foreground(style.Secondary).Render("● " + c.status))
+		b.WriteString("\n")
+	}
+
+	help := fmt.Sprintf("%s refresh  %s filter (%s)  %s kill proc  %s/%s navigate",
 		style.HelpKeyStyle.Render("r"),
 		style.HelpKeyStyle.Render("f"),
 		connFilterNames[(c.filter+1)%3],
+		style.HelpKeyStyle.Render("K"),
 		style.HelpKeyStyle.Render("j"),
 		style.HelpKeyStyle.Render("k"),
 	)
@@ -222,4 +283,15 @@ func (c ConnsPanel) refresh() tea.Msg {
 		return connsRefreshMsg{err: err}
 	}
 	return connsRefreshMsg{entries: entries}
+}
+
+func (c ConnsPanel) killSelected() tea.Cmd {
+	if c.cursor >= len(c.filtered) {
+		return nil
+	}
+	e := c.filtered[c.cursor]
+	return func() tea.Msg {
+		err := net.KillProcess(e.PID)
+		return connKillMsg{pid: e.PID, process: e.Process, err: err}
+	}
 }

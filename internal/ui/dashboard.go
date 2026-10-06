@@ -23,10 +23,11 @@ const (
 	TabMonitor
 	TabRescue
 	TabProfiles
-	tabCount = 8
+	TabLog
+	tabCount = 9
 )
 
-var tabNames = []string{"WiFi", "Interfaces", "VPN", "DNS", "Conns", "Monitor", "Rescue", "Profiles"}
+var tabNames = []string{"WiFi", "Interfaces", "VPN", "DNS", "Conns", "Monitor", "Rescue", "Profiles", "Log"}
 
 type Model struct {
 	client    *nm.Client
@@ -39,6 +40,7 @@ type Model struct {
 	monitor   MonitorPanel
 	rescue    RescuePanel
 	profiles  ProfilesPanel
+	logPanel  LogPanel
 	notify    *NotifyManager
 	cfg       config.Config
 	version   string
@@ -69,6 +71,7 @@ func NewModel(version string, cfg config.Config) Model {
 	m.conns = NewConnsPanel()
 	m.monitor = NewMonitorPanel()
 	m.rescue = NewRescuePanel()
+	m.logPanel = NewLogPanel(m.notify)
 
 	return m
 }
@@ -152,6 +155,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "8":
 			m.activeTab = TabProfiles
 			return m, nil
+		case "9":
+			m.activeTab = TabLog
+			return m, nil
 		}
 
 	case tea.WindowSizeMsg:
@@ -166,6 +172,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.monitor.SetSize(msg.Width-4, contentHeight)
 		m.rescue.SetSize(msg.Width-4, contentHeight)
 		m.profiles.SetSize(msg.Width-4, contentHeight)
+		m.logPanel.SetSize(msg.Width-4, contentHeight)
 		return m, nil
 
 	case MonitorTickMsg, MonitorDataMsg:
@@ -180,6 +187,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.iface, cmd = m.iface.Update(msg)
 		return m, cmd
+	}
+
+	switch ev := msg.(type) {
+	case dnsChangeMsg:
+		if ev.err == nil {
+			m.notify.AddEvent(NotifyInfo, "DNS", "DNS servers updated")
+		} else {
+			m.notify.AddEvent(NotifyError, "DNS", "DNS change failed")
+		}
+	case vpnToggleMsg:
+		if ev.err == nil {
+			m.notify.AddEvent(NotifyInfo, "VPN", "VPN connection toggled")
+		}
+	case profileActivateMsg:
+		if ev.err == nil {
+			m.notify.AddEvent(NotifyInfo, "Profile", "Profile activated")
+		} else {
+			m.notify.AddEvent(NotifyWarn, "Profile", "Profile activated with errors")
+		}
+	case connKillMsg:
+		if ev.err == nil {
+			m.notify.AddEvent(NotifyWarn, "Process", fmt.Sprintf("Killed %s (pid %d)", ev.process, ev.pid))
+		}
 	}
 
 	var cmd tea.Cmd
@@ -200,6 +230,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.rescue, cmd = m.rescue.Update(msg)
 	case TabProfiles:
 		m.profiles, cmd = m.profiles.Update(msg)
+	case TabLog:
+		m.logPanel, cmd = m.logPanel.Update(msg)
 	}
 
 	return m, cmd
@@ -270,6 +302,8 @@ func (m Model) View() string {
 		content = m.rescue.View()
 	case TabProfiles:
 		content = m.profiles.View()
+	case TabLog:
+		content = m.logPanel.View()
 	}
 
 	panelStyle := style.PanelStyle
@@ -282,7 +316,7 @@ func (m Model) View() string {
 	statusBar := fmt.Sprintf(" %s tab  %s-%s panels  %s quit",
 		style.HelpKeyStyle.Render("Tab"),
 		style.HelpKeyStyle.Render("1"),
-		style.HelpKeyStyle.Render("8"),
+		style.HelpKeyStyle.Render("9"),
 		style.HelpKeyStyle.Render("q"),
 	)
 	b.WriteString(lipgloss.NewStyle().Foreground(style.Muted).Render(statusBar))

@@ -10,9 +10,10 @@ import (
 )
 
 type Notification struct {
-	Message string
-	Level   NotifyLevel
-	Time    time.Time
+	Message  string
+	Category string
+	Level    NotifyLevel
+	Time     time.Time
 }
 
 type NotifyLevel int
@@ -31,7 +32,7 @@ type NotifyManager struct {
 
 func NewNotifyManager() *NotifyManager {
 	return &NotifyManager{
-		maxItems:   10,
+		maxItems:   100,
 		prevStates: make(map[string]nm.DeviceState),
 	}
 }
@@ -52,25 +53,40 @@ func (n *NotifyManager) CheckDevices(devices []nm.Device) {
 		if prev != dev.State {
 			switch {
 			case dev.State == nm.DeviceStateActivated && prev != nm.DeviceStateActivated:
-				n.add(NotifyInfo, fmt.Sprintf("%s connected", dev.Name))
+				n.add(NotifyInfo, dev.Name, fmt.Sprintf("%s connected", dev.Name))
 			case prev == nm.DeviceStateActivated && dev.State != nm.DeviceStateActivated:
-				n.add(NotifyWarn, fmt.Sprintf("%s disconnected", dev.Name))
+				n.add(NotifyWarn, dev.Name, fmt.Sprintf("%s disconnected", dev.Name))
 			case dev.State == nm.DeviceStateFailed:
-				n.add(NotifyError, fmt.Sprintf("%s failed", dev.Name))
+				n.add(NotifyError, dev.Name, fmt.Sprintf("%s failed", dev.Name))
 			}
 		}
 	}
 }
 
-func (n *NotifyManager) add(level NotifyLevel, msg string) {
+// AddEvent records an event in the log with a category label.
+func (n *NotifyManager) AddEvent(level NotifyLevel, category, msg string) {
+	n.add(level, category, msg)
+}
+
+func (n *NotifyManager) add(level NotifyLevel, category, msg string) {
 	n.notifications = append(n.notifications, Notification{
-		Message: msg,
-		Level:   level,
-		Time:    time.Now(),
+		Message:  msg,
+		Category: category,
+		Level:    level,
+		Time:     time.Now(),
 	})
 	if len(n.notifications) > n.maxItems {
 		n.notifications = n.notifications[1:]
 	}
+}
+
+// Log returns all notifications, most recent first.
+func (n *NotifyManager) Log() []Notification {
+	result := make([]Notification, len(n.notifications))
+	for i, j := 0, len(n.notifications)-1; j >= 0; i, j = i+1, j-1 {
+		result[i] = n.notifications[j]
+	}
+	return result
 }
 
 func (n *NotifyManager) Recent(count int) []Notification {
