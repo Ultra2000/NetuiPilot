@@ -112,7 +112,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		if m.activeTab == TabRescue && m.rescue.mode == rescueModeInput {
-			if msg.String() != "q" && msg.String() != "ctrl+c" {
+			s := msg.String()
+			if s != "q" && s != "ctrl+c" && s != "tab" && s != "shift+tab" {
 				var cmd tea.Cmd
 				m.rescue, cmd = m.rescue.Update(msg)
 				return m, cmd
